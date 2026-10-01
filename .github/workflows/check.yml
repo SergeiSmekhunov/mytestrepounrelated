@@ -1,8 +1,8 @@
 name: 116117 check
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"   # GitHub's minimum; runs often start a few minutes late
+  # schedule:   # re-enable once a manual run passes
+  #   - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
 concurrency:

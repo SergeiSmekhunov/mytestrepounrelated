@@ -195,7 +195,10 @@ def main() -> int:
                 remember(fp)
             return 0
 
-        log.error("unexpected page (blocked or layout changed). First 800 chars:\n%s", page[:800])
+        log.error("unexpected page (blocked or layout changed)")
+        log.error("URL now: %s | title: %r", d.current_url, d.title)
+        log.error("Page text:\n%s", page[:1500] or "(empty body)")
+        log.error("HTML head:\n%s", d.page_source[:1500])
         return 1
     finally:
         d.quit()
