@@ -1,8 +1,8 @@
 name: 116117 check
 
 on:
-  # schedule:   # re-enable once a manual run passes
-  #   - cron: "*/5 * * * *"
+  schedule:
+    - cron: "*/5 * * * *"   # GitHub's minimum; runs often start a few minutes late
   workflow_dispatch: {}
 
 concurrency:
@@ -34,7 +34,6 @@ jobs:
       - name: Check appointments
         env:
           BOOKING_URL: ${{ secrets.BOOKING_URL }}
-          RADIUS_KM: "50"
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}

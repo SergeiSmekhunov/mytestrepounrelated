@@ -37,4 +37,4 @@ Based on [TorbenWetter/116117-terminservice-scraper](https://github.com/TorbenWe
 - GitHub's cron is best effort: `*/5` often lands every 5–15 minutes.
 - Scheduled workflows on public repos pause after 60 days without commits; GitHub
   emails before that and a single "Enable workflow" click restarts them.
-- Radius: set `RADIUS_KM` in the workflow (must match a bubble on the site, e.g. 50 or 150).
+- Radius comes from `?suchradius=` in `BOOKING_URL`; the site honours it.

@@ -1,12 +1,13 @@
 """
-116117 Terminservice watcher (based on TorbenWetter/116117-terminservice-scraper).
+116117 Terminservice watcher (inspired by TorbenWetter/116117-terminservice-scraper,
+adapted to the current 116117-termine.de page).
 
-Opens the search URL in headless Chrome, reads the result list and alerts by
-email (Gmail SMTP) and/or Telegram. It never clicks anything that books.
+Opens the search URL in headless Chrome, reads "N Termine im Umkreis von X km"
+and the result list, and alerts by email (Gmail SMTP) and/or Telegram.
+It never clicks anything that books.
 
 Env (GitHub Actions secrets):
-  BOOKING_URL          full search URL incl. code, PLZ and specialties
-  RADIUS_KM            radius to enforce in the UI filter (default 50)
+  BOOKING_URL          full search URL incl. code, PLZ, specialties and ?suchradius=
   SMTP_USER            Gmail address that sends the mail
   SMTP_APP_PASSWORD    Gmail app password (not your normal password)
   MAIL_TO              comma-separated recipients
@@ -20,8 +21,10 @@ Exit codes: 0 = ran fine (slots or not), 1 = page did not load as expected.
 import hashlib
 import logging
 import os
+import re
 import smtplib
 import sys
+import time
 import urllib.parse
 import urllib.request
 from email.message import EmailMessage
@@ -40,11 +43,14 @@ BOOKING_URL = os.getenv("BOOKING_URL", "").strip()
 if not BOOKING_URL:
     log.warning("BOOKING_URL secret not set yet; skipping run")
     sys.exit(0)
-RADIUS = os.getenv("RADIUS_KM", "50")
+
 STATE_FILE = Path(os.getenv("STATE_FILE", ".state/last"))
 
-NO_RESULTS = "Ihre Suche ergab leider keine Treffer"
-RESULT_ITEM = ".search-results-item.ets-search-results-item"
+# e.g. "0 TERMINE IM UMKREIS VON 50 KM", "1 TERMIN IM UMKREIS VON 50 KM"
+COUNT_RE = re.compile(r"(\d+)\s+TERMINE?\s+IM\s+UMKREIS\s+VON\s+(\d+)\s*KM", re.I)
+# Text after the result list starts here; used to cut out the slot listing.
+END_MARKERS = ("Was Sie jetzt tun können", "Support:")
+NOISE_LINES = {"Umkreis erweitern", "Filtern"}
 CODE_PROBLEM_WORDS = ("ungültig", "abgelaufen", "bereits verwendet", "bereits eingelöst", "nicht gefunden")
 
 
@@ -58,55 +64,44 @@ def driver() -> Chrome:
     return Chrome(options=o)
 
 
-def wait_spinner(d) -> None:
+def body_text(d) -> str:
     try:
-        WebDriverWait(d, 30).until(EC.invisibility_of_element_located((By.CSS_SELECTOR, ".loading-icon")))
-    except TimeoutException:
-        log.warning("spinner did not disappear")
-
-
-def accept_cookies(d) -> None:
-    try:
-        WebDriverWait(d, 5).until(EC.element_to_be_clickable((
-            By.XPATH, "//a[contains(@class,'cookies-info-close') and contains(.,'Auswahl bestätigen')]"
-        ))).click()
-        log.info("cookie banner closed (necessary only)")
-    except TimeoutException:
-        pass
-
-
-def current_radius(d) -> str:
-    try:
-        return d.find_element(By.CSS_SELECTOR, ".ets-search-filter-distance .ets-search-filter-header .col-10 > span").text
+        return d.find_element(By.TAG_NAME, "body").text
     except Exception:
         return ""
 
 
-def ensure_radius(d) -> None:
-    """The URL param may not stick; click the radius bubble if needed."""
-    if RADIUS in current_radius(d):
-        return
-    w = WebDriverWait(d, 20)
-    try:
-        w.until(EC.element_to_be_clickable((
-            By.XPATH, "//div[contains(@class,'ets-search-filter-distance')]//div[contains(@class,'ets-search-filter-header')]"
-        ))).click()
-        bubbles = w.until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".ets-search-filter-distance-bubbles")))
-        bubbles.find_element(By.XPATH, f".//label[normalize-space(text())='{RADIUS}']").click()
-        wait_spinner(d)
-        log.info("radius now: %r", current_radius(d))
-    except Exception as e:
-        log.warning("could not set radius %s km (%s); continuing with %r", RADIUS, e, current_radius(d))
+def accept_cookies(d) -> None:
+    """Close the cookie banner with only necessary cookies, if one shows up."""
+    for xp in ("//button[contains(.,'Nur notwendige')]", "//a[contains(.,'Nur notwendige')]",
+               "//button[contains(.,'Auswahl bestätigen')]", "//a[contains(.,'Auswahl bestätigen')]"):
+        try:
+            WebDriverWait(d, 2).until(EC.element_to_be_clickable((By.XPATH, xp))).click()
+            log.info("cookie banner closed")
+            return
+        except TimeoutException:
+            continue
 
 
-def wait_results(d) -> None:
-    try:
-        WebDriverWait(d, 40).until(EC.any_of(
-            EC.presence_of_element_located((By.XPATH, f"//*[contains(text(),'{NO_RESULTS}')]")),
-            EC.presence_of_element_located((By.CSS_SELECTOR, RESULT_ITEM)),
-        ))
-    except TimeoutException:
-        pass
+def wait_for_outcome(d, timeout: int = 45) -> str:
+    """Wait until the result count (or a code error) is rendered; return page text."""
+    end = time.time() + timeout
+    text = ""
+    while time.time() < end:
+        text = body_text(d)
+        if COUNT_RE.search(text) or any(w in text.lower() for w in CODE_PROBLEM_WORDS):
+            time.sleep(2)  # let the list finish rendering after the count appears
+            return body_text(d)
+        time.sleep(1)
+    return text
+
+
+def slot_section(text: str, count_match: re.Match) -> str:
+    """Text between the count line and the 'what you can do now' block."""
+    rest = text[count_match.end():]
+    cut = min((i for i in (rest.find(m) for m in END_MARKERS) if i >= 0), default=len(rest))
+    lines = [l.strip() for l in rest[:cut].splitlines()]
+    return "\n".join(l for l in lines if l and l not in NOISE_LINES)
 
 
 def send_email(subject: str, body: str) -> None:
@@ -163,32 +158,30 @@ def main() -> int:
     shot = Path("screenshot.png")
     try:
         d.get(BOOKING_URL)
-        wait_spinner(d)
         accept_cookies(d)
-        ensure_radius(d)
-        wait_results(d)
+        page = wait_for_outcome(d)
         d.save_screenshot(str(shot))
 
-        page = d.find_element(By.TAG_NAME, "body").text
-        items = [e.text.strip() for e in d.find_elements(By.CSS_SELECTOR, RESULT_ITEM) if e.text.strip()]
-
-        if items and NO_RESULTS not in page:
-            fp = hashlib.sha256("\n".join(items).encode()).hexdigest()
-            if already_sent(fp):
-                log.info("%d slot(s), unchanged since last alert", len(items))
+        m = COUNT_RE.search(page)
+        if m:
+            count, radius = int(m.group(1)), m.group(2)
+            log.info("%d appointment(s) within %s km", count, radius)
+            if count == 0:
+                remember("none")  # so the next real slot list alerts again
                 return 0
-            body = "\n\n".join(items) + f"\n\nBook quickly: {BOOKING_URL}"
+            slots = slot_section(page, m)
+            fp = hashlib.sha256(slots.encode()).hexdigest()
+            if already_sent(fp):
+                log.info("slot list unchanged since last alert")
+                return 0
+            body = (f"{count} appointment(s) within {radius} km:\n\n{slots}\n\n"
+                    f"Book quickly: {BOOKING_URL}")
+            log.info("alerting:\n%s", body)
             alert("116117: appointments available", body, shot)
             remember(fp)
             return 0
 
-        if NO_RESULTS in page:
-            log.info("No appointments available")
-            remember("none")  # so the next real slot list alerts again
-            return 0
-
-        low = page.lower()
-        if any(w in low for w in CODE_PROBLEM_WORDS):
+        if any(w in page.lower() for w in CODE_PROBLEM_WORDS):
             fp = "code:" + hashlib.sha256(page.encode()).hexdigest()
             if not already_sent(fp):
                 alert("116117: code problem", page[:2000], shot)
@@ -198,7 +191,6 @@ def main() -> int:
         log.error("unexpected page (blocked or layout changed)")
         log.error("URL now: %s | title: %r", d.current_url, d.title)
         log.error("Page text:\n%s", page[:1500] or "(empty body)")
-        log.error("HTML head:\n%s", d.page_source[:1500])
         return 1
     finally:
         d.quit()
