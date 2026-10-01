@@ -2,7 +2,9 @@ name: 116117 check
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # GitHub's minimum; runs often start a few minutes late
+    # Each run checks every 2 min for ~13 min, so late/skipped cron starts don't leave gaps.
+    # Off the full hour on purpose: GitHub's busiest (and most delayed) slot.
+    - cron: "3,18,33,48 * * * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -12,7 +14,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -39,7 +41,15 @@ jobs:
           MAIL_TO: ${{ secrets.MAIL_TO }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python check.py
+        run: |
+          fail=0
+          end=$((SECONDS + 780))
+          while :; do
+            python check.py || fail=1
+            [ "$SECONDS" -ge "$end" ] && break
+            sleep 120
+          done
+          exit $fail
 
       - uses: actions/cache/save@v4
         if: always()

@@ -1,6 +1,6 @@
 # 116117 watch
 
-Checks the 116117 Terminservice every ~5 minutes on GitHub Actions and alerts by
+Checks the 116117 Terminservice about every 2 minutes on GitHub Actions (a run starts every 15 min and loops) and alerts by
 email and Telegram when slots appear. Never books anything.
 Based on [TorbenWetter/116117-terminservice-scraper](https://github.com/TorbenWetter/116117-terminservice-scraper).
 
@@ -34,7 +34,7 @@ Based on [TorbenWetter/116117-terminservice-scraper](https://github.com/TorbenWe
 
 ## Notes
 
-- GitHub's cron is best effort: `*/5` often lands every 5–15 minutes.
+- GitHub's cron is best effort and can start late; the in-run loop covers most of that.
 - Scheduled workflows on public repos pause after 60 days without commits; GitHub
   emails before that and a single "Enable workflow" click restarts them.
 - Radius comes from `?suchradius=` in `BOOKING_URL`; the site honours it.
