@@ -3,6 +3,7 @@ name: 116117 check
 on:
   schedule:
     - cron: "4,19,34,49 * * * *"
+  workflow_dispatch: {}
 
 concurrency:
   group: check-116117
