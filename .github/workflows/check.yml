@@ -3,7 +3,7 @@ name: 116117 check
 on:
   schedule:
     # Each run checks every 2 min for ~13 min, so late/skipped cron starts don't leave gaps.
-    # Off the full hour on purpose: GitHub's busiest (and most delayed) slot.
+    # Off the full hour on purpose: GitHub's busiest (and most delayed) slot. 
     - cron: "3,18,33,48 * * * *"
   workflow_dispatch: {}
 
