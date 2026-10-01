@@ -36,7 +36,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 log = logging.getLogger("116117")
 
-BOOKING_URL = os.environ["BOOKING_URL"]
+BOOKING_URL = os.getenv("BOOKING_URL", "").strip()
+if not BOOKING_URL:
+    log.warning("BOOKING_URL secret not set yet; skipping run")
+    sys.exit(0)
 RADIUS = os.getenv("RADIUS_KM", "50")
 STATE_FILE = Path(os.getenv("STATE_FILE", ".state/last"))
 
